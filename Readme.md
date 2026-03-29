@@ -13,6 +13,14 @@ A Go application providing an S3-compatible object storage server with a web UI 
 - Bulk operations (upload, delete)
 - Telemetry and observability
 
+# UI
+
+![Dashboard](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/dashboard.png)
+![Bucket](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/bucket.png)
+![Buckets](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/buckets.png)
+![Login](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/login.png)
+![Sharedlinks](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/sharelinks.png)
+
 # Magika and ONNXRUNTIME Integration
 
 This project uses **ONNXRUNTIME** for running the **Magika** ML model (Google's content-type detection).
