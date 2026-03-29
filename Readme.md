@@ -963,5 +963,4 @@ Copyright © 2024 Almeria Industries
 # Support
 
 For issues and questions:
-- GitHub Issues: https://github.com/your-org/go-s3-storage/issues
 - Email: support@almeriaindustries.com
