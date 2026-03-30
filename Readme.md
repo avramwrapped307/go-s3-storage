@@ -299,6 +299,8 @@ Refer to `src/Taskfile.yaml` for all available tasks and their descriptions.
 
 # Running with Docker
 
+## Local image
+
 If you built the Docker image, you can run it with:
 
 ```shell
@@ -312,6 +314,21 @@ docker run --rm -it \
   -e LOCAL_AUTH_USERNAME=admin \
   -e LOCAL_AUTH_PASSWORD=changeme123 \
   s3-storage
+```
+
+## Docker.io image
+
+```shell
+docker run --rm -it \
+  -p 8080:8080 \
+  -v storage_test:/data \
+  -e S3_AUTH_ENABLED=true \
+  -e S3_ACCESS_KEY_ID=your-access-key \
+  -e S3_SECRET_ACCESS_KEY=your-secret-key \
+  -e WEB_UI_ENABLED=true \
+  -e LOCAL_AUTH_USERNAME=admin \
+  -e LOCAL_AUTH_PASSWORD=changeme123 \
+  docker.io/danbordeanu/go-s3-storage:latest
 ```
 
 # Running with Nomad
