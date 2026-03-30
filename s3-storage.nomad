@@ -11,7 +11,7 @@ variable "ingress_prefix" {
 
 variable "request_base_url" {
   type = string
-  default = "https://s3-storage.almeriaindustries.com"
+  default = "https://s3-storage.myhost.example.com"
 }
 
 variable "s3_auth_enabled" {
@@ -22,12 +22,12 @@ variable "s3_auth_enabled" {
 
 variable  "s3_access_key_id" {
   type    = string
-  default = "testkey"
+  default = "accesskeyid"
 }
 
 variable  "s3_secret_access_key" {
   type    = string
-  default = "testsecret"
+  default = "secretkeyid"
 }
 
 variable "s3_region" {
@@ -52,7 +52,7 @@ variable "local_auth_username" {
 
 variable "local_auth_password" {
   type    = string
-  default = "changeme123__"
+  default = "mysupersecretpassword"
 }
 
 variable "storage_quota_bytes" {
@@ -139,12 +139,12 @@ job "go-s3-storage" {
         "traefik.enable=true",
 
         # Main router - handles all paths (S3 API at root, UI, share, etc.)
-        "traefik.http.routers.gos3.rule=Host(`s3-storage.almeriaindustries.com`)",
+        "traefik.http.routers.gos3.rule=Host(`s3-storage.myhost.example.com`)",
         "traefik.http.routers.gos3.entrypoints=https",
         "traefik.http.routers.gos3.tls.certresolver=myresolver",
 
         # HTTP -> HTTPS redirect router
-        "traefik.http.routers.gos3-http.rule=Host(`s3-storage.almeriaindustries.com`)",
+        "traefik.http.routers.gos3-http.rule=Host(`s3-storage.myhost.example.com`)",
         "traefik.http.routers.gos3-http.entrypoints=http",
         "traefik.http.routers.gos3-http.middlewares=gos3-redirect-https",
 
