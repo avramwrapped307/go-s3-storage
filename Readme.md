@@ -958,7 +958,7 @@ The Taskfile will detect these variables and skip automatic downloads.
 
 # License
 
-Copyright © 2024 Almeria Industries
+BSD License
 
 # Contributing
 
