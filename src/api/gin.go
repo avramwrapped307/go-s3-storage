@@ -214,11 +214,22 @@ func StartGin(ctx context.Context) {
 	s3API.HEAD("/:bucket", handlers.HeadBucket)
 	s3API.GET("/:bucket", handlers.ListObjects)
 
+	// Register multipart upload dispatcher middleware
+	// This middleware intercepts multipart upload requests and routes them to the appropriate handlers
+	// It must be registered BEFORE the object routes to take precedence
+	s3API.Use(multipartDispatcher())
+
 	// Register object routes
 	s3API.PUT("/:bucket/*key", handlers.PutObject)
 	s3API.GET("/:bucket/*key", handlers.GetObject)
 	s3API.HEAD("/:bucket/*key", handlers.HeadObject)
 	s3API.DELETE("/:bucket/*key", handlers.DeleteObject)
+	// POST route for multipart uploads (handled by multipartDispatcher middleware)
+	s3API.POST("/:bucket/*key", func(c *gin.Context) {
+		// This handler should never be reached because multipartDispatcher intercepts all POST requests
+		// If we get here, it means the request didn't match any multipart upload patterns
+		c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
+	})
 
 	// Register share link management routes (protected by auth if enabled)
 	s3API.POST("/share/create/:bucket/*key", handlers.CreateShareLink)
@@ -302,6 +313,22 @@ func StartGin(ctx context.Context) {
 		if err = httpSrv.ListenAndServe(); err != nil {
 			if !errors.Is(err, http.ErrServerClosed) {
 				log.Fatalf("Unrecoverable HTTP Server failure: %s", err.Error())
+			}
+		}
+	}()
+
+	// Start background cleanup for expired multipart uploads
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := services.CleanupExpiredUploads(context.Background()); err != nil {
+					log.Errorf("Multipart cleanup failed: %v", err)
+				}
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()

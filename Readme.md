@@ -13,14 +13,6 @@ A Go application providing an S3-compatible object storage server with a web UI 
 - Bulk operations (upload, delete)
 - Telemetry and observability
 
-# UI
-
-![Dashboard](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/dashboard.png)
-![Bucket](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/bucket.png)
-![Buckets](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/buckets.png)
-![Login](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/login.png)
-![Sharedlinks](https://github.com/danbordeanu/go-s3-storage/blob/main/screenshots/sharelinks.png)
-
 # Magika and ONNXRUNTIME Integration
 
 This project uses **ONNXRUNTIME** for running the **Magika** ML model (Google's content-type detection).
@@ -115,16 +107,21 @@ If using manual installation, configure these environment variables **before bui
 
 ```bash
 # Point to your ONNXRUNTIME installation
+xport CGO_ENABLED=1
+export CGO_CFLAGS="-I/path/to/onnxruntime/include"
+export DYLD_LIBRARY_PATH="/path/to/onnxruntime/lib"
 export ONNXRUNTIME_LIB="/path/to/onnxruntime/lib"
 export ONNXRUNTIME_INCLUDE="/path/to/onnxruntime/include"
-
 # Point to your Magika installation
-export MAGIKA_ASSETS="/path/to/magika/assets"
+export MAGIKA_ASSETS_DIR="/path/to/magika/assets"
 
 # Example:
+export CGO_ENABLED=1
+export CGO_CFLAGS="-I/opt/onnxruntime/include"
+export DYLD_LIBRARY_PATH="/opt/onnxruntime/lib"
 export ONNXRUNTIME_LIB="/opt/onnxruntime-osx-arm64-1.23.2/lib"
 export ONNXRUNTIME_INCLUDE="/opt/onnxruntime-osx-arm64-1.23.2/include"
-export MAGIKA_ASSETS="/opt/magika/assets"
+export MAGIKA_ASSETS_DIR="/opt/magika/assets"
 ```
 
 Then build normally:
@@ -185,9 +182,13 @@ If you have ONNXRUNTIME and Magika installed manually:
 
 ```shell
 cd src
+export CGO_ENABLED=1
+export CGO_CFLAGS="-I/path/to/onnxruntime/include"
+export DYLD_LIBRARY_PATH="/path/to/onnxruntime/lib"
+export MAGIKA_ASSETS_DIR=/path/tomagika/assets
 export ONNXRUNTIME_LIB="/path/to/onnxruntime/lib"
 export ONNXRUNTIME_INCLUDE="/path/to/onnxruntime/include"
-export MAGIKA_ASSETS="/path/to/magika/assets"
+export MAGIKA_ASSETS_DIR="/path/to/magika/assets"
 
 go build -tags onnxruntime \
   -ldflags="-linkmode=external -extldflags=-L${ONNXRUNTIME_LIB}" \
@@ -299,8 +300,6 @@ Refer to `src/Taskfile.yaml` for all available tasks and their descriptions.
 
 # Running with Docker
 
-## Local image
-
 If you built the Docker image, you can run it with:
 
 ```shell
@@ -314,21 +313,6 @@ docker run --rm -it \
   -e LOCAL_AUTH_USERNAME=admin \
   -e LOCAL_AUTH_PASSWORD=changeme123 \
   s3-storage
-```
-
-## Docker.io image
-
-```shell
-docker run --rm -it \
-  -p 8080:8080 \
-  -v storage_test:/data \
-  -e S3_AUTH_ENABLED=true \
-  -e S3_ACCESS_KEY_ID=your-access-key \
-  -e S3_SECRET_ACCESS_KEY=your-secret-key \
-  -e WEB_UI_ENABLED=true \
-  -e LOCAL_AUTH_USERNAME=admin \
-  -e LOCAL_AUTH_PASSWORD=changeme123 \
-  docker.io/danbordeanu/go-s3-storage:latest
 ```
 
 # Running with Nomad
@@ -769,6 +753,19 @@ cd test
 go test -run TestBuckets/CreateBucket
 ```
 
+## Run multipart tests
+
+```shell
+cd src
+go test ./services -run Multipart -v     # Run all service multipart tests with verbose output                                                                                                                                                                                           
+go test ./api/handlers -run Multipart -v # Run all handler multipart tests with verbose output                                                                                                                                                                                            
+go test ./... -run Multipart -v          # Run all multipart tests everywhere                                                                                                                                                                                          
+```
+
+
+
+```shell
+
 ## Test Endpoint Configuration
 
 Configure the test endpoint via environment variable:
@@ -975,7 +972,7 @@ The Taskfile will detect these variables and skip automatic downloads.
 
 # License
 
-BSD License
+Copyright © 2024 Almeria Industries
 
 # Contributing
 
@@ -988,4 +985,5 @@ BSD License
 # Support
 
 For issues and questions:
+- GitHub Issues: https://github.com/your-org/go-s3-storage/issues
 - Email: support@almeriaindustries.com

@@ -123,7 +123,7 @@ func CreateBucket(c *gin.Context) {
 	ctx, span := tracer.Start(ctx, "CreateBucket handler")
 	defer span.End()
 
-	log.Debugf("Creating bucket: %s", c.MustGet("bucket_name").(string))
+	log.Debugf("Creating bucket: %s", bucketName)
 
 	span.AddEvent("Create Bucket",
 		oteltrace.WithAttributes(
@@ -253,7 +253,7 @@ func HeadBucket(c *gin.Context) {
 	ctx, span := tracer.Start(ctx, "HeadBucket handler")
 	defer span.End()
 
-	log.Debugf("Checking bucket existence: %s", c.MustGet("bucket_name").(string))
+	log.Debugf("Checking bucket existence: %s", bucketName)
 
 	span.AddEvent("Head Bucket",
 		oteltrace.WithAttributes(

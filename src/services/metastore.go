@@ -444,3 +444,120 @@ func (ms *MetaStore) GetTotalStorageSize() int64 {
 	}
 	return totalSize
 }
+
+// AddMultipartUpload records a new multipart upload
+// This method provides a thread-safe way to add a new multipart upload to the metadata.
+// It appends the new upload to the list and saves the updated metadata to disk.
+// Parameters:
+// - upload: The multipart upload metadata to be added
+// Returns:
+// - error: An error if there was an issue saving the metadata, or nil on success
+func (ms *MetaStore) AddMultipartUpload(upload model.Multipart) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	ms.metadata.Multiparts = append(ms.metadata.Multiparts, upload)
+	return ms.saveUnlocked()
+}
+
+// GetMultipartUpload retrieves upload metadata by ID
+// This method provides a thread-safe way to retrieve a specific multipart upload by its upload ID.
+// It iterates through the list of multipart uploads and returns a copy if a match is found.
+// Parameters:
+// - uploadID: The ID of the multipart upload to retrieve
+// Returns:
+// - *model.Multipart: A pointer to the multipart upload metadata, or nil if not found
+// - error: An error if the upload does not exist, or nil on success
+func (ms *MetaStore) GetMultipartUpload(uploadID string) (*model.Multipart, error) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	for _, upload := range ms.metadata.Multiparts {
+		if upload.UploadID == uploadID {
+			// Return a copy
+			result := upload
+			return &result, nil
+		}
+	}
+	return nil, ErrNoSuchUpload
+}
+
+// UpdateMultipartPart updates a part in the upload
+// This method provides a thread-safe way to update a specific part within a multipart upload.
+// It finds the upload by ID, updates or adds the part, and saves the metadata to disk.
+// Parameters:
+// - uploadID: The ID of the multipart upload
+// - partNum: The part number to update
+// - part: The part upload metadata
+// Returns:
+// - error: An error if the upload does not exist or if there was an issue saving the metadata, or nil on success
+func (ms *MetaStore) UpdateMultipartPart(uploadID string, partNum int, part model.PartUpload) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	for i := range ms.metadata.Multiparts {
+		if ms.metadata.Multiparts[i].UploadID == uploadID {
+			// Initialize Parts map if nil
+			if ms.metadata.Multiparts[i].Parts == nil {
+				ms.metadata.Multiparts[i].Parts = make(map[int]model.PartUpload)
+			}
+			ms.metadata.Multiparts[i].Parts[partNum] = part
+			return ms.saveUnlocked()
+		}
+	}
+	return ErrNoSuchUpload
+}
+
+// RemoveMultipartUpload deletes upload tracking
+// This method provides a thread-safe way to remove a multipart upload from the metadata.
+// It searches for the upload by ID, removes it if found, and saves the updated metadata to disk.
+// Parameters:
+// - uploadID: The ID of the multipart upload to remove
+// Returns:
+// - error: An error if the upload does not exist or if there was an issue saving the metadata, or nil on success
+func (ms *MetaStore) RemoveMultipartUpload(uploadID string) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	idx := -1
+	for i, upload := range ms.metadata.Multiparts {
+		if upload.UploadID == uploadID {
+			idx = i
+			break
+		}
+	}
+
+	if idx == -1 {
+		return ErrNoSuchUpload
+	}
+
+	// O(1) delete using swap-and-truncate pattern
+	lastIdx := len(ms.metadata.Multiparts) - 1
+	ms.metadata.Multiparts[idx] = ms.metadata.Multiparts[lastIdx]
+	ms.metadata.Multiparts = ms.metadata.Multiparts[:lastIdx]
+
+	return ms.saveUnlocked()
+}
+
+// GetExpiredUploads returns uploads older than TTL
+// This method provides a thread-safe way to retrieve multipart uploads that have exceeded the specified TTL.
+// It iterates through all uploads and returns those that were initiated before the current time minus the TTL.
+// Parameters:
+// - ttlSeconds: The time-to-live in seconds for multipart uploads
+// Returns:
+// - []model.Multipart: A slice of expired multipart uploads
+func (ms *MetaStore) GetExpiredUploads(ttlSeconds int64) []model.Multipart {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	cutoffTime := time.Now().Unix() - ttlSeconds
+	var expired []model.Multipart
+
+	for _, upload := range ms.metadata.Multiparts {
+		if upload.Initiated < cutoffTime {
+			expired = append(expired, upload)
+		}
+	}
+
+	return expired
+}

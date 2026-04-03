@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"fmt"
+	"net/http"
+	"path/filepath"
 	"s3-storage/configuration"
 	"s3-storage/model"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/danbordeanu/go-logger"
 	"github.com/danbordeanu/go-stats/concurrency"
@@ -184,8 +187,12 @@ func GetSharedObject(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// Stream object to response with S3-compatible headers
-	response.SuccessObjectResponse(c, meta, file)
+	// Serve content using http.ServeContent which properly supports Range requests
+	c.Header("ETag", "\""+meta.ETag+"\"")
+	c.Header("Content-Type", meta.ContentType)
+	c.Header("Last-Modified", time.Unix(meta.LastModified, 0).UTC().Format(http.TimeFormat))
+	name := filepath.Base(key)
+	http.ServeContent(c.Writer, c.Request, name, time.Unix(meta.LastModified, 0), file)
 }
 
 // DeleteShareLink godoc

@@ -2,6 +2,7 @@ package response
 
 import (
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -36,8 +37,15 @@ func SuccessObjectResponse(c *gin.Context, meta *model.ObjectMeta, reader io.Rea
 	c.Header("ETag", "\""+meta.ETag+"\"")
 	c.Header("Last-Modified", time.Unix(meta.LastModified, 0).UTC().Format(http.TimeFormat))
 	c.Header("Content-Type", meta.ContentType)
+	c.Header("Accept-Ranges", "bytes")
 
-	c.DataFromReader(http.StatusOK, meta.Size, meta.ContentType, reader, nil)
+	fmt.Printf("DEBUG SuccessObjectResponse: Sending object with meta.Size=%d bytes\n", meta.Size)
+
+	// Use io.LimitReader to ensure we only send exactly meta.Size bytes
+	limitedReader := io.LimitReader(reader, meta.Size)
+	c.Status(http.StatusOK)
+	written, err := io.Copy(c.Writer, limitedReader)
+	fmt.Printf("DEBUG SuccessObjectResponse: Actually sent %d bytes (error: %v)\n", written, err)
 }
 
 // SuccessHeadObjectResponse sends headers for a HEAD request without a body
