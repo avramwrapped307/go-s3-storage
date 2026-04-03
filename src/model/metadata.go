@@ -21,12 +21,23 @@ type BucketMeta struct {
 	Owner        string `msg:"owner"`         // User ID of bucket creator (empty = system bucket, admin only)
 }
 
-// Multipart represents an in-progress multipart upload (placeholder)
+// Multipart represents an in-progress multipart upload
 type Multipart struct {
-	UploadID  string `msg:"upload_id"`
-	Bucket    string `msg:"bucket"`
-	Key       string `msg:"key"`
-	Initiated int64  `msg:"initiated"`
+	UploadID    string              `msg:"upload_id"`
+	Bucket      string              `msg:"bucket"`
+	Key         string              `msg:"key"`
+	Initiated   int64               `msg:"initiated"`
+	Owner       string              `msg:"owner"`
+	Parts       map[int]PartUpload  `msg:"parts"`       // part number -> metadata
+	ContentType string              `msg:"content_type"`
+}
+
+// PartUpload represents metadata for an uploaded part
+type PartUpload struct {
+	PartNumber   int    `msg:"part_number"`
+	Size         int64  `msg:"size"`
+	ETag         string `msg:"etag"`
+	LastModified int64  `msg:"last_modified"`
 }
 
 // HealingLock represents a healing operation lock (placeholder)

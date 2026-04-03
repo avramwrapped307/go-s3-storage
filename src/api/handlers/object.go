@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"s3-storage/configuration"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/danbordeanu/go-logger"
 	"github.com/danbordeanu/go-stats/concurrency"
@@ -100,9 +103,9 @@ func PutObject(c *gin.Context) {
 		response.FailureXmlResponse(c, err, bucket)
 		return
 	}
-	// check if 5GB content length is exceeded (S3 limits single PUT to 5GB)
+	// check if 100mb content length is exceeded (S3 limits single PUT to 5GB)
 	if c.Request.ContentLength > configuration.ObjectMaxUploadSize {
-		e = fmt.Errorf("entity too large: content length %d exceeds 5GB limit", c.Request.ContentLength)
+		e = fmt.Errorf("entity too large: content length %d exceeds 100Mb limit", c.Request.ContentLength)
 		span.SetStatus(codes.Error, e.Error())
 		span.RecordError(e)
 		log.Errorf("%s", e)
@@ -185,7 +188,8 @@ func PutObject(c *gin.Context) {
 	}
 
 	// Stream request body to temp file (with optional SHA256 calculation)
-	_, err = io.Copy(destination, body)
+	// Limit to ContentLength to prevent reading extra data beyond what client declared
+	_, err = io.Copy(destination, io.LimitReader(body, size))
 	if err != nil {
 		tempFile.Close()
 		e = fmt.Errorf("error streaming request body: %s", err)
@@ -321,11 +325,18 @@ func GetObject(c *gin.Context) {
 		response.FailureXmlResponse(c, err, key)
 		return
 	}
-
 	defer file.Close()
 
-	// Stream object to response with S3-compatible headers
-	response.SuccessObjectResponse(c, meta, file)
+	// Serve content using http.ServeContent which properly supports Range requests
+	// Set S3-compatible headers (ETag, Content-Type, Last-Modified)
+	c.Header("ETag", "\""+meta.ETag+"\"")
+	c.Header("Content-Type", meta.ContentType)
+	c.Header("Last-Modified", time.Unix(meta.LastModified, 0).UTC().Format(http.TimeFormat))
+
+	// Use file base name for ServeContent's name parameter
+	name := filepath.Base(key)
+	// http.ServeContent will handle Range requests and set Content-Length/206 responses
+	http.ServeContent(c.Writer, c.Request, name, time.Unix(meta.LastModified, 0), file)
 }
 
 // HeadObject godoc

@@ -788,6 +788,18 @@ func (z *Multipart) DecodeMsg(dc *msgp.Reader) (err error) {
 				err = msgp.WrapError(err, "Initiated")
 				return
 			}
+		case "owner":
+			z.Owner, err = dc.ReadString()
+			if err != nil {
+				err = msgp.WrapError(err, "Owner")
+				return
+			}
+		case "content_type":
+			z.ContentType, err = dc.ReadString()
+			if err != nil {
+				err = msgp.WrapError(err, "ContentType")
+				return
+			}
 		default:
 			err = dc.Skip()
 			if err != nil {
@@ -801,9 +813,9 @@ func (z *Multipart) DecodeMsg(dc *msgp.Reader) (err error) {
 
 // EncodeMsg implements msgp.Encodable
 func (z *Multipart) EncodeMsg(en *msgp.Writer) (err error) {
-	// map header, size 4
+	// map header, size 6
 	// write "upload_id"
-	err = en.Append(0x84, 0xa9, 0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64, 0x5f, 0x69, 0x64)
+	err = en.Append(0x86, 0xa9, 0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64, 0x5f, 0x69, 0x64)
 	if err != nil {
 		return
 	}
@@ -842,15 +854,35 @@ func (z *Multipart) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "Initiated")
 		return
 	}
+	// write "owner"
+	err = en.Append(0xa5, 0x6f, 0x77, 0x6e, 0x65, 0x72)
+	if err != nil {
+		return
+	}
+	err = en.WriteString(z.Owner)
+	if err != nil {
+		err = msgp.WrapError(err, "Owner")
+		return
+	}
+	// write "content_type"
+	err = en.Append(0xac, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x5f, 0x74, 0x79, 0x70, 0x65)
+	if err != nil {
+		return
+	}
+	err = en.WriteString(z.ContentType)
+	if err != nil {
+		err = msgp.WrapError(err, "ContentType")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *Multipart) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// map header, size 4
+	// map header, size 6
 	// string "upload_id"
-	o = append(o, 0x84, 0xa9, 0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64, 0x5f, 0x69, 0x64)
+	o = append(o, 0x86, 0xa9, 0x75, 0x70, 0x6c, 0x6f, 0x61, 0x64, 0x5f, 0x69, 0x64)
 	o = msgp.AppendString(o, z.UploadID)
 	// string "bucket"
 	o = append(o, 0xa6, 0x62, 0x75, 0x63, 0x6b, 0x65, 0x74)
@@ -861,6 +893,12 @@ func (z *Multipart) MarshalMsg(b []byte) (o []byte, err error) {
 	// string "initiated"
 	o = append(o, 0xa9, 0x69, 0x6e, 0x69, 0x74, 0x69, 0x61, 0x74, 0x65, 0x64)
 	o = msgp.AppendInt64(o, z.Initiated)
+	// string "owner"
+	o = append(o, 0xa5, 0x6f, 0x77, 0x6e, 0x65, 0x72)
+	o = msgp.AppendString(o, z.Owner)
+	// string "content_type"
+	o = append(o, 0xac, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x5f, 0x74, 0x79, 0x70, 0x65)
+	o = msgp.AppendString(o, z.ContentType)
 	return
 }
 
@@ -906,6 +944,18 @@ func (z *Multipart) UnmarshalMsg(bts []byte) (o []byte, err error) {
 				err = msgp.WrapError(err, "Initiated")
 				return
 			}
+		case "owner":
+			z.Owner, bts, err = msgp.ReadStringBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "Owner")
+				return
+			}
+		case "content_type":
+			z.ContentType, bts, err = msgp.ReadStringBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "ContentType")
+				return
+			}
 		default:
 			bts, err = msgp.Skip(bts)
 			if err != nil {
@@ -920,6 +970,184 @@ func (z *Multipart) UnmarshalMsg(bts []byte) (o []byte, err error) {
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *Multipart) Msgsize() (s int) {
-	s = 1 + 10 + msgp.StringPrefixSize + len(z.UploadID) + 7 + msgp.StringPrefixSize + len(z.Bucket) + 4 + msgp.StringPrefixSize + len(z.Key) + 10 + msgp.Int64Size
+	s = 1 + 10 + msgp.StringPrefixSize + len(z.UploadID) + 7 + msgp.StringPrefixSize + len(z.Bucket) + 4 + msgp.StringPrefixSize + len(z.Key) + 10 + msgp.Int64Size + 6 + msgp.StringPrefixSize + len(z.Owner) + 13 + msgp.StringPrefixSize + len(z.ContentType)
+	return
+}
+
+// DecodeMsg implements msgp.Decodable
+func (z *PartUpload) DecodeMsg(dc *msgp.Reader) (err error) {
+	var field []byte
+	_ = field
+	var zb0001 uint32
+	zb0001, err = dc.ReadMapHeader()
+	if err != nil {
+		err = msgp.WrapError(err)
+		return
+	}
+	for zb0001 > 0 {
+		zb0001--
+		field, err = dc.ReadMapKeyPtr()
+		if err != nil {
+			err = msgp.WrapError(err)
+			return
+		}
+		switch msgp.UnsafeString(field) {
+		case "part_number":
+			z.PartNumber, err = dc.ReadInt()
+			if err != nil {
+				err = msgp.WrapError(err, "PartNumber")
+				return
+			}
+		case "size":
+			z.Size, err = dc.ReadInt64()
+			if err != nil {
+				err = msgp.WrapError(err, "Size")
+				return
+			}
+		case "etag":
+			z.ETag, err = dc.ReadString()
+			if err != nil {
+				err = msgp.WrapError(err, "ETag")
+				return
+			}
+		case "last_modified":
+			z.LastModified, err = dc.ReadInt64()
+			if err != nil {
+				err = msgp.WrapError(err, "LastModified")
+				return
+			}
+		default:
+			err = dc.Skip()
+			if err != nil {
+				err = msgp.WrapError(err)
+				return
+			}
+		}
+	}
+	return
+}
+
+// EncodeMsg implements msgp.Encodable
+func (z *PartUpload) EncodeMsg(en *msgp.Writer) (err error) {
+	// map header, size 4
+	// write "part_number"
+	err = en.Append(0x84, 0xab, 0x70, 0x61, 0x72, 0x74, 0x5f, 0x6e, 0x75, 0x6d, 0x62, 0x65, 0x72)
+	if err != nil {
+		return
+	}
+	err = en.WriteInt(z.PartNumber)
+	if err != nil {
+		err = msgp.WrapError(err, "PartNumber")
+		return
+	}
+	// write "size"
+	err = en.Append(0xa4, 0x73, 0x69, 0x7a, 0x65)
+	if err != nil {
+		return
+	}
+	err = en.WriteInt64(z.Size)
+	if err != nil {
+		err = msgp.WrapError(err, "Size")
+		return
+	}
+	// write "etag"
+	err = en.Append(0xa4, 0x65, 0x74, 0x61, 0x67)
+	if err != nil {
+		return
+	}
+	err = en.WriteString(z.ETag)
+	if err != nil {
+		err = msgp.WrapError(err, "ETag")
+		return
+	}
+	// write "last_modified"
+	err = en.Append(0xad, 0x6c, 0x61, 0x73, 0x74, 0x5f, 0x6d, 0x6f, 0x64, 0x69, 0x66, 0x69, 0x65, 0x64)
+	if err != nil {
+		return
+	}
+	err = en.WriteInt64(z.LastModified)
+	if err != nil {
+		err = msgp.WrapError(err, "LastModified")
+		return
+	}
+	return
+}
+
+// MarshalMsg implements msgp.Marshaler
+func (z *PartUpload) MarshalMsg(b []byte) (o []byte, err error) {
+	o = msgp.Require(b, z.Msgsize())
+	// map header, size 4
+	// string "part_number"
+	o = append(o, 0x84, 0xab, 0x70, 0x61, 0x72, 0x74, 0x5f, 0x6e, 0x75, 0x6d, 0x62, 0x65, 0x72)
+	o = msgp.AppendInt(o, z.PartNumber)
+	// string "size"
+	o = append(o, 0xa4, 0x73, 0x69, 0x7a, 0x65)
+	o = msgp.AppendInt64(o, z.Size)
+	// string "etag"
+	o = append(o, 0xa4, 0x65, 0x74, 0x61, 0x67)
+	o = msgp.AppendString(o, z.ETag)
+	// string "last_modified"
+	o = append(o, 0xad, 0x6c, 0x61, 0x73, 0x74, 0x5f, 0x6d, 0x6f, 0x64, 0x69, 0x66, 0x69, 0x65, 0x64)
+	o = msgp.AppendInt64(o, z.LastModified)
+	return
+}
+
+// UnmarshalMsg implements msgp.Unmarshaler
+func (z *PartUpload) UnmarshalMsg(bts []byte) (o []byte, err error) {
+	var field []byte
+	_ = field
+	var zb0001 uint32
+	zb0001, bts, err = msgp.ReadMapHeaderBytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err)
+		return
+	}
+	for zb0001 > 0 {
+		zb0001--
+		field, bts, err = msgp.ReadMapKeyZC(bts)
+		if err != nil {
+			err = msgp.WrapError(err)
+			return
+		}
+		switch msgp.UnsafeString(field) {
+		case "part_number":
+			z.PartNumber, bts, err = msgp.ReadIntBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "PartNumber")
+				return
+			}
+		case "size":
+			z.Size, bts, err = msgp.ReadInt64Bytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "Size")
+				return
+			}
+		case "etag":
+			z.ETag, bts, err = msgp.ReadStringBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "ETag")
+				return
+			}
+		case "last_modified":
+			z.LastModified, bts, err = msgp.ReadInt64Bytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "LastModified")
+				return
+			}
+		default:
+			bts, err = msgp.Skip(bts)
+			if err != nil {
+				err = msgp.WrapError(err)
+				return
+			}
+		}
+	}
+	o = bts
+	return
+}
+
+// Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
+func (z *PartUpload) Msgsize() (s int) {
+	s = 1 + 12 + msgp.IntSize + 5 + msgp.Int64Size + 5 + msgp.StringPrefixSize + len(z.ETag) + 14 + msgp.Int64Size
 	return
 }

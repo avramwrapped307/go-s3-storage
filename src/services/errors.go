@@ -22,6 +22,11 @@ var (
 	ErrShareLinkNotFound       = errors.New("ShareLinkNotFound")
 	ErrShareLinkExpired        = errors.New("ShareLinkExpired")
 	ErrQuotaExceeded           = errors.New("QuotaExceeded")
+	ErrNoSuchUpload            = errors.New("NoSuchUpload")
+	ErrInvalidPart             = errors.New("InvalidPart")
+	ErrInvalidPartOrder        = errors.New("InvalidPartOrder")
+	ErrEntityTooSmall          = errors.New("EntityTooSmall")
+	ErrInvalidPartNumber       = errors.New("InvalidPartNumber")
 )
 
 // S3ErrorCode returns the S3 error code string for a given error
@@ -63,6 +68,16 @@ func S3ErrorCode(err error) string {
 		return "AccessDenied"
 	case errors.Is(err, ErrQuotaExceeded):
 		return "QuotaExceeded"
+	case errors.Is(err, ErrNoSuchUpload):
+		return "NoSuchUpload"
+	case errors.Is(err, ErrInvalidPart):
+		return "InvalidPart"
+	case errors.Is(err, ErrInvalidPartOrder):
+		return "InvalidPartOrder"
+	case errors.Is(err, ErrEntityTooSmall):
+		return "EntityTooSmall"
+	case errors.Is(err, ErrInvalidPartNumber):
+		return "InvalidPartNumber"
 	default:
 		return "InternalError"
 	}
@@ -105,6 +120,16 @@ func S3ErrorMessage(err error) string {
 		return "The share link has expired."
 	case errors.Is(err, ErrQuotaExceeded):
 		return "Your storage quota has been exceeded."
+	case errors.Is(err, ErrNoSuchUpload):
+		return "The specified multipart upload does not exist."
+	case errors.Is(err, ErrInvalidPart):
+		return "One or more of the specified parts could not be found."
+	case errors.Is(err, ErrInvalidPartOrder):
+		return "The list of parts was not in ascending order."
+	case errors.Is(err, ErrEntityTooSmall):
+		return "Your proposed upload is smaller than the minimum allowed object size."
+	case errors.Is(err, ErrInvalidPartNumber):
+		return "The part number must be an integer between 1 and 10000, inclusive."
 	default:
 		return "We encountered an internal error. Please try again."
 	}
@@ -146,6 +171,11 @@ func S3ErrorHTTPStatus(err error) int {
 		return 400
 	case errors.Is(err, ErrQuotaExceeded):
 		return 403
+	case errors.Is(err, ErrNoSuchUpload):
+		return 404
+	case errors.Is(err, ErrInvalidPart), errors.Is(err, ErrInvalidPartOrder),
+		errors.Is(err, ErrEntityTooSmall), errors.Is(err, ErrInvalidPartNumber):
+		return 400
 	default:
 		return 500
 	}

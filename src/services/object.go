@@ -12,6 +12,8 @@ import (
 
 	"s3-storage/model"
 	"s3-storage/vfs"
+
+	"github.com/danbordeanu/go-logger"
 )
 
 const xlMetaVersion = 1
@@ -36,6 +38,8 @@ const xlMetaVersion = 1
 //
 // fmt.Printf("Object stored with ETag: %s and Content-Type: %s\n", meta.ETag, meta.ContentType)
 func PutObject(ctx context.Context, bucket, key string, reader vfs.MultipartFile, size int64, etag string) (*model.ObjectMeta, error) {
+	log := logger.SugaredLogger()
+
 	// Validate bucket exists
 	if !metaStore.BucketExists(bucket) {
 		return nil, ErrNoSuchBucket
@@ -49,6 +53,13 @@ func PutObject(ctx context.Context, bucket, key string, reader vfs.MultipartFile
 	diskPath := filepath.Join(objectPath, diskUUID)
 	partPath := filepath.Join(diskPath, "part.1")
 	xlMetaPath := filepath.Join(objectPath, "xl.meta")
+
+	// Clean up any existing object at this key to prevent conflicts
+	if _, err := os.Stat(objectPath); err == nil {
+		if err := os.RemoveAll(objectPath); err != nil {
+			return nil, fmt.Errorf("failed to remove existing object: %w", err)
+		}
+	}
 
 	// Create directory structure
 	if err := os.MkdirAll(diskPath, 0755); err != nil {
@@ -122,10 +133,10 @@ func PutObject(ctx context.Context, bucket, key string, reader vfs.MultipartFile
 		return nil, fmt.Errorf("failed to write xl.meta: %w", err)
 	}
 
-	// Update bucket stats asynchronously
-	go func() {
-		metaStore.UpdateBucketStats(bucket, written, 1)
-	}()
+	// Update bucket stats synchronously to ensure quota enforcement works correctly
+	if err := metaStore.UpdateBucketStats(bucket, written, 1); err != nil {
+		log.Errorf("Failed to update bucket stats for %s: %v", bucket, err)
+	}
 
 	return meta, nil
 }
@@ -145,7 +156,7 @@ func PutObject(ctx context.Context, bucket, key string, reader vfs.MultipartFile
 //
 // defer file.Close()
 // fmt.Printf("Object metadata: Size=%d, ETag=%s, Content-Type=%s\n", meta.Size, meta.ETag, meta.ContentType)
-func GetObject(bucket, key string) (*model.ObjectMeta, *os.File, error) {
+func GetObject(bucket, key string) (*model.ObjectMeta, vfs.MultipartFile, error) {
 	// Validate bucket exists
 	if !metaStore.BucketExists(bucket) {
 		return nil, nil, ErrNoSuchBucket
@@ -171,12 +182,31 @@ func GetObject(bucket, key string) (*model.ObjectMeta, *os.File, error) {
 
 	// Open part.1 file
 	partPath := filepath.Join(objectPath, meta.DiskUUID, "part.1")
-	file, err := os.Open(partPath)
+	f, err := os.Open(partPath)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return &meta, file, nil
+	// Ensure file is positioned at the start
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+
+	// Wrap os.File as vfs.MultipartFile (it already implements ReadSeekCloser)
+	var mfile vfs.MultipartFile = f
+
+	// Debug: Check actual file size vs metadata size
+	fileInfo, _ := f.Stat()
+	if fileInfo != nil {
+		actualSize := fileInfo.Size()
+		fmt.Printf("DEBUG GetObject: xl.meta Size=%d, actual file size=%d, path=%s\n", meta.Size, actualSize, partPath)
+		if actualSize != meta.Size {
+			fmt.Printf("DEBUG GetObject: WARNING - Size mismatch! Meta says %d but file is %d bytes\n", meta.Size, actualSize)
+		}
+	}
+
+	return &meta, mfile, nil
 }
 
 // HeadObject retrieves only the metadata of an object without opening the data file
@@ -236,6 +266,8 @@ func HeadObject(bucket, key string) (*model.ObjectMeta, error) {
 //
 // fmt.Println("Object deleted successfully")
 func DeleteObject(bucket, key string) error {
+	log := logger.SugaredLogger()
+
 	// Validate bucket exists
 	if !metaStore.BucketExists(bucket) {
 		return ErrNoSuchBucket
@@ -266,10 +298,10 @@ func DeleteObject(bucket, key string) error {
 		return err
 	}
 
-	// Update bucket stats asynchronously (decrement size and count)
-	go func() {
-		metaStore.UpdateBucketStats(bucket, -objectSize, -1)
-	}()
+	// Update bucket stats synchronously to ensure quota enforcement works correctly (decrement size and count)
+	if err := metaStore.UpdateBucketStats(bucket, -objectSize, -1); err != nil {
+		log.Errorf("Failed to update bucket stats for %s: %v", bucket, err)
+	}
 
 	return nil
 }

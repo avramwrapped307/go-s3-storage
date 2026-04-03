@@ -304,6 +304,18 @@ func (z *User) DecodeMsg(dc *msgp.Reader) (err error) {
 					}
 				}
 			}
+		case "s3_access_key_id":
+			z.S3AccessKeyID, err = dc.ReadString()
+			if err != nil {
+				err = msgp.WrapError(err, "S3AccessKeyID")
+				return
+			}
+		case "s3_secret_access_key":
+			z.S3SecretAccessKey, err = dc.ReadString()
+			if err != nil {
+				err = msgp.WrapError(err, "S3SecretAccessKey")
+				return
+			}
 		default:
 			err = dc.Skip()
 			if err != nil {
@@ -317,9 +329,9 @@ func (z *User) DecodeMsg(dc *msgp.Reader) (err error) {
 
 // EncodeMsg implements msgp.Encodable
 func (z *User) EncodeMsg(en *msgp.Writer) (err error) {
-	// map header, size 11
+	// map header, size 13
 	// write "id"
-	err = en.Append(0x8b, 0xa2, 0x69, 0x64)
+	err = en.Append(0x8d, 0xa2, 0x69, 0x64)
 	if err != nil {
 		return
 	}
@@ -468,15 +480,35 @@ func (z *User) EncodeMsg(en *msgp.Writer) (err error) {
 			return
 		}
 	}
+	// write "s3_access_key_id"
+	err = en.Append(0xb0, 0x73, 0x33, 0x5f, 0x61, 0x63, 0x63, 0x65, 0x73, 0x73, 0x5f, 0x6b, 0x65, 0x79, 0x5f, 0x69, 0x64)
+	if err != nil {
+		return
+	}
+	err = en.WriteString(z.S3AccessKeyID)
+	if err != nil {
+		err = msgp.WrapError(err, "S3AccessKeyID")
+		return
+	}
+	// write "s3_secret_access_key"
+	err = en.Append(0xb4, 0x73, 0x33, 0x5f, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x5f, 0x61, 0x63, 0x63, 0x65, 0x73, 0x73, 0x5f, 0x6b, 0x65, 0x79)
+	if err != nil {
+		return
+	}
+	err = en.WriteString(z.S3SecretAccessKey)
+	if err != nil {
+		err = msgp.WrapError(err, "S3SecretAccessKey")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *User) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// map header, size 11
+	// map header, size 13
 	// string "id"
-	o = append(o, 0x8b, 0xa2, 0x69, 0x64)
+	o = append(o, 0x8d, 0xa2, 0x69, 0x64)
 	o = msgp.AppendString(o, z.ID)
 	// string "username"
 	o = append(o, 0xa8, 0x75, 0x73, 0x65, 0x72, 0x6e, 0x61, 0x6d, 0x65)
@@ -523,6 +555,12 @@ func (z *User) MarshalMsg(b []byte) (o []byte, err error) {
 		o = append(o, 0xa9, 0x63, 0x61, 0x6e, 0x5f, 0x77, 0x72, 0x69, 0x74, 0x65)
 		o = msgp.AppendBool(o, z.BucketPermissions[za0002].CanWrite)
 	}
+	// string "s3_access_key_id"
+	o = append(o, 0xb0, 0x73, 0x33, 0x5f, 0x61, 0x63, 0x63, 0x65, 0x73, 0x73, 0x5f, 0x6b, 0x65, 0x79, 0x5f, 0x69, 0x64)
+	o = msgp.AppendString(o, z.S3AccessKeyID)
+	// string "s3_secret_access_key"
+	o = append(o, 0xb4, 0x73, 0x33, 0x5f, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x5f, 0x61, 0x63, 0x63, 0x65, 0x73, 0x73, 0x5f, 0x6b, 0x65, 0x79)
+	o = msgp.AppendString(o, z.S3SecretAccessKey)
 	return
 }
 
@@ -671,6 +709,18 @@ func (z *User) UnmarshalMsg(bts []byte) (o []byte, err error) {
 					}
 				}
 			}
+		case "s3_access_key_id":
+			z.S3AccessKeyID, bts, err = msgp.ReadStringBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "S3AccessKeyID")
+				return
+			}
+		case "s3_secret_access_key":
+			z.S3SecretAccessKey, bts, err = msgp.ReadStringBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "S3SecretAccessKey")
+				return
+			}
 		default:
 			bts, err = msgp.Skip(bts)
 			if err != nil {
@@ -693,6 +743,7 @@ func (z *User) Msgsize() (s int) {
 	for za0002 := range z.BucketPermissions {
 		s += 1 + 12 + msgp.StringPrefixSize + len(z.BucketPermissions[za0002].BucketName) + 9 + msgp.BoolSize + 10 + msgp.BoolSize
 	}
+	s += 17 + msgp.StringPrefixSize + len(z.S3AccessKeyID) + 21 + msgp.StringPrefixSize + len(z.S3SecretAccessKey)
 	return
 }
 
@@ -841,6 +892,18 @@ func (z *UserPersistent) DecodeMsg(dc *msgp.Reader) (err error) {
 					}
 				}
 			}
+		case "S3AccessKeyID":
+			z.S3AccessKeyID, err = dc.ReadString()
+			if err != nil {
+				err = msgp.WrapError(err, "S3AccessKeyID")
+				return
+			}
+		case "S3SecretAccessKey":
+			z.S3SecretAccessKey, err = dc.ReadString()
+			if err != nil {
+				err = msgp.WrapError(err, "S3SecretAccessKey")
+				return
+			}
 		default:
 			err = dc.Skip()
 			if err != nil {
@@ -854,9 +917,9 @@ func (z *UserPersistent) DecodeMsg(dc *msgp.Reader) (err error) {
 
 // EncodeMsg implements msgp.Encodable
 func (z *UserPersistent) EncodeMsg(en *msgp.Writer) (err error) {
-	// map header, size 11
+	// map header, size 13
 	// write "ID"
-	err = en.Append(0x8b, 0xa2, 0x49, 0x44)
+	err = en.Append(0x8d, 0xa2, 0x49, 0x44)
 	if err != nil {
 		return
 	}
@@ -1005,15 +1068,35 @@ func (z *UserPersistent) EncodeMsg(en *msgp.Writer) (err error) {
 			return
 		}
 	}
+	// write "S3AccessKeyID"
+	err = en.Append(0xad, 0x53, 0x33, 0x41, 0x63, 0x63, 0x65, 0x73, 0x73, 0x4b, 0x65, 0x79, 0x49, 0x44)
+	if err != nil {
+		return
+	}
+	err = en.WriteString(z.S3AccessKeyID)
+	if err != nil {
+		err = msgp.WrapError(err, "S3AccessKeyID")
+		return
+	}
+	// write "S3SecretAccessKey"
+	err = en.Append(0xb1, 0x53, 0x33, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x41, 0x63, 0x63, 0x65, 0x73, 0x73, 0x4b, 0x65, 0x79)
+	if err != nil {
+		return
+	}
+	err = en.WriteString(z.S3SecretAccessKey)
+	if err != nil {
+		err = msgp.WrapError(err, "S3SecretAccessKey")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *UserPersistent) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// map header, size 11
+	// map header, size 13
 	// string "ID"
-	o = append(o, 0x8b, 0xa2, 0x49, 0x44)
+	o = append(o, 0x8d, 0xa2, 0x49, 0x44)
 	o = msgp.AppendString(o, z.ID)
 	// string "Username"
 	o = append(o, 0xa8, 0x55, 0x73, 0x65, 0x72, 0x6e, 0x61, 0x6d, 0x65)
@@ -1060,6 +1143,12 @@ func (z *UserPersistent) MarshalMsg(b []byte) (o []byte, err error) {
 		o = append(o, 0xa9, 0x63, 0x61, 0x6e, 0x5f, 0x77, 0x72, 0x69, 0x74, 0x65)
 		o = msgp.AppendBool(o, z.BucketPermissions[za0002].CanWrite)
 	}
+	// string "S3AccessKeyID"
+	o = append(o, 0xad, 0x53, 0x33, 0x41, 0x63, 0x63, 0x65, 0x73, 0x73, 0x4b, 0x65, 0x79, 0x49, 0x44)
+	o = msgp.AppendString(o, z.S3AccessKeyID)
+	// string "S3SecretAccessKey"
+	o = append(o, 0xb1, 0x53, 0x33, 0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x41, 0x63, 0x63, 0x65, 0x73, 0x73, 0x4b, 0x65, 0x79)
+	o = msgp.AppendString(o, z.S3SecretAccessKey)
 	return
 }
 
@@ -1208,6 +1297,18 @@ func (z *UserPersistent) UnmarshalMsg(bts []byte) (o []byte, err error) {
 					}
 				}
 			}
+		case "S3AccessKeyID":
+			z.S3AccessKeyID, bts, err = msgp.ReadStringBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "S3AccessKeyID")
+				return
+			}
+		case "S3SecretAccessKey":
+			z.S3SecretAccessKey, bts, err = msgp.ReadStringBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "S3SecretAccessKey")
+				return
+			}
 		default:
 			bts, err = msgp.Skip(bts)
 			if err != nil {
@@ -1230,6 +1331,7 @@ func (z *UserPersistent) Msgsize() (s int) {
 	for za0002 := range z.BucketPermissions {
 		s += 1 + 12 + msgp.StringPrefixSize + len(z.BucketPermissions[za0002].BucketName) + 9 + msgp.BoolSize + 10 + msgp.BoolSize
 	}
+	s += 14 + msgp.StringPrefixSize + len(z.S3AccessKeyID) + 18 + msgp.StringPrefixSize + len(z.S3SecretAccessKey)
 	return
 }
 

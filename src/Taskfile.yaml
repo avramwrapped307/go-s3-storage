@@ -12,15 +12,18 @@ vars:
 
 env:
   # Use local deps directory or fallback to user-provided paths
+  CGO_ENABLED: "1"
+  CGO_CFLAGS:
+    sh: echo "-I${ONNXRUNTIME_INCLUDE:-{{.ONNX_DIR}}/include}"
   DYLD_LIBRARY_PATH:
     sh: echo "${ONNXRUNTIME_LIB:-{{.ONNX_DIR}}/lib}"
   LD_LIBRARY_PATH:
     sh: echo "${ONNXRUNTIME_LIB:-{{.ONNX_DIR}}/lib}"
-  CGO_ENABLED: "1"
-  CGO_CFLAGS:
-    sh: echo "-I${ONNXRUNTIME_INCLUDE:-{{.ONNX_DIR}}/include}"
   MAGIKA_ASSETS_DIR:
-    sh: echo "${MAGIKA_ASSETS:-{{.MAGIKA_DIR}}/assets}"
+    sh: echo "${MAGIKA_ASSETS_DIR:-{{.MAGIKA_DIR}}/assets}"
+  MAGIKA_MODEL: "standard_v3_3"
+  STORAGE_DIRECTORY:
+    sh: echo "${STORAGE_DIRECTORY:-$(pwd)/data}"
   WEB_UI_ENABLED: "true"
 
 tasks:
@@ -103,12 +106,6 @@ tasks:
     cmds:
       - |
         echo "Setting up Magika..."
-
-        # Skip if user provided their own path
-        if [ -n "$MAGIKA_ASSETS" ]; then
-          echo "Using user-provided Magika assets at: $MAGIKA_ASSETS"
-          exit 0
-        fi
 
         # Skip if already cloned
         if [ -d "{{.MAGIKA_DIR}}/assets" ]; then
@@ -227,9 +224,43 @@ tasks:
     cmds:
       - echo "Building binary..."
       - |
-        # Determine linker flags based on environment
-        ONNX_LIB_PATH="${ONNXRUNTIME_LIB:-{{.ONNX_DIR}}/lib}"
+        # Determine paths based on environment (use absolute paths for CGO)
+        if [ -n "$ONNXRUNTIME_INCLUDE" ]; then
+          ONNX_INCLUDE_PATH="$ONNXRUNTIME_INCLUDE"
+        else
+          # Convert relative path to absolute
+          ONNX_INCLUDE_PATH="$(cd {{.ONNX_DIR}}/include && pwd)"
+        fi
+
+        if [ -n "$ONNXRUNTIME_LIB" ]; then
+          ONNX_LIB_PATH="$ONNXRUNTIME_LIB"
+        else
+          # Convert relative path to absolute
+          ONNX_LIB_PATH="$(cd {{.ONNX_DIR}}/lib && pwd)"
+        fi
+
+        if [ -n "$MAGIKA_ASSETS_DIR" ]; then
+          MAGIKA_ASSETS="$MAGIKA_ASSETS_DIR"
+        else
+          # Convert relative path to absolute
+          MAGIKA_ASSETS="$(cd {{.MAGIKA_DIR}}/assets && pwd)"
+        fi
+
+        echo "Using ONNXRUNTIME include: $ONNX_INCLUDE_PATH"
         echo "Using ONNXRUNTIME lib: $ONNX_LIB_PATH"
+        echo "Using MAGIKA assets: $MAGIKA_ASSETS"
+
+        # Export all required environment variables with absolute paths
+        export CGO_ENABLED=1
+        export CGO_CFLAGS="-I${ONNX_INCLUDE_PATH}"
+        export DYLD_LIBRARY_PATH="${ONNX_LIB_PATH}"
+        export LD_LIBRARY_PATH="${ONNX_LIB_PATH}"
+        export MAGIKA_ASSETS_DIR="${MAGIKA_ASSETS}"
+        export MAGIKA_MODEL="standard_v3_3"
+
+        echo "Building Go binary with ONNXRUNTIME support..."
+        echo "Command: go build -o {{.BINARY_NAME}} -tags onnxruntime -ldflags=\"-linkmode=external -extldflags=-L${ONNX_LIB_PATH}\" main.go"
+        echo "Env vars: CGO_CFLAGS=${CGO_CFLAGS}, DYLD_LIBRARY_PATH=${DYLD_LIBRARY_PATH}, LD_LIBRARY_PATH=${LD_LIBRARY_PATH}, MAGIKA_ASSETS_DIR=${MAGIKA_ASSETS_DIR}"
 
         go build -o {{.BINARY_NAME}} \
           -tags onnxruntime \
