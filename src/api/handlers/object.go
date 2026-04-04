@@ -67,7 +67,7 @@ func PutObject(c *gin.Context) {
 
 	// URL-decode the key to handle percent-encoded names (e.g., spaces encoded as %20)
 	if decodedKey, err := url.PathUnescape(key); err == nil {
-		key = decodedKey
+		key = strings.TrimSpace(decodedKey)
 	} else {
 		e = fmt.Errorf("invalid object key encoding: %w", err)
 		log.Errorf("%s", e)
@@ -90,6 +90,16 @@ func PutObject(c *gin.Context) {
 		return
 	}
 
+	// check if 100mb content length is exceeded (S3 limits single PUT to 5GB)
+	if c.Request.ContentLength > configuration.ObjectMaxUploadSize {
+		e = fmt.Errorf("entity too large: content length %d exceeds 100Mb limit", c.Request.ContentLength)
+		span.SetStatus(codes.Error, e.Error())
+		span.RecordError(e)
+		log.Errorf("%s", e)
+		response.FailureXmlResponse(c, services.ErrEntityTooLarge, key)
+		return
+	}
+
 	span.AddEvent("Check Storage Quota",
 		oteltrace.WithAttributes(attribute.String("BucketName", bucket),
 			attribute.String("CorrelationId", correlationId)))
@@ -101,15 +111,6 @@ func PutObject(c *gin.Context) {
 		span.RecordError(err)
 		log.Errorf("%s", e)
 		response.FailureXmlResponse(c, err, bucket)
-		return
-	}
-	// check if 100mb content length is exceeded (S3 limits single PUT to 5GB)
-	if c.Request.ContentLength > configuration.ObjectMaxUploadSize {
-		e = fmt.Errorf("entity too large: content length %d exceeds 100Mb limit", c.Request.ContentLength)
-		span.SetStatus(codes.Error, e.Error())
-		span.RecordError(e)
-		log.Errorf("%s", e)
-		response.FailureXmlResponse(c, services.ErrEntityTooLarge, key)
 		return
 	}
 
@@ -150,7 +151,7 @@ func PutObject(c *gin.Context) {
 
 	// Get request body
 	body := c.Request.Body
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	// Get content length
 	size := c.Request.ContentLength
@@ -175,7 +176,7 @@ func PutObject(c *gin.Context) {
 		return
 	}
 	tempFileName = tempFile.Name()
-	defer os.Remove(tempFileName)
+	defer func() { _ = os.Remove(tempFileName) }()
 
 	// Prepare destination writer (with or without hashing)
 	var destination io.Writer = tempFile
@@ -191,7 +192,7 @@ func PutObject(c *gin.Context) {
 	// Limit to ContentLength to prevent reading extra data beyond what client declared
 	_, err = io.Copy(destination, io.LimitReader(body, size))
 	if err != nil {
-		tempFile.Close()
+		_ = tempFile.Close()
 		e = fmt.Errorf("error streaming request body: %s", err)
 		span.SetStatus(codes.Error, e.Error())
 		span.RecordError(err)
@@ -206,7 +207,7 @@ func PutObject(c *gin.Context) {
 	}
 
 	// Close and reopen temp file for reading (os.File implements MultipartFile interface)
-	tempFile.Close()
+	_ = tempFile.Close()
 	tempFile, err = os.Open(tempFileName)
 	if err != nil {
 		e = fmt.Errorf("error reopening temporary file: %s", err)
@@ -217,7 +218,7 @@ func PutObject(c *gin.Context) {
 		return
 	}
 	reader = tempFile
-	defer tempFile.Close()
+	defer func() { _ = tempFile.Close() }()
 
 	// Call service to put object
 	meta, err := services.PutObject(c.Request.Context(), bucket, key, reader, size, contentSHA256)
@@ -276,7 +277,7 @@ func GetObject(c *gin.Context) {
 
 	// URL-decode key to handle percent-encoded names (e.g., spaces encoded as %20)
 	if decodedKey, err := url.PathUnescape(key); err == nil {
-		key = decodedKey
+		key = strings.TrimSpace(decodedKey)
 	} else {
 		e = fmt.Errorf("invalid object key encoding: %w", err)
 		span.SetStatus(codes.Error, e.Error())
@@ -325,7 +326,7 @@ func GetObject(c *gin.Context) {
 		response.FailureXmlResponse(c, err, key)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Serve content using http.ServeContent which properly supports Range requests
 	// Set S3-compatible headers (ETag, Content-Type, Last-Modified)
@@ -335,8 +336,10 @@ func GetObject(c *gin.Context) {
 
 	// Use file base name for ServeContent's name parameter
 	name := filepath.Base(key)
+	// Wrap file in a SectionReader limited to meta.Size so we never send more than the metadata's size
+	section := io.NewSectionReader(file, 0, meta.Size)
 	// http.ServeContent will handle Range requests and set Content-Length/206 responses
-	http.ServeContent(c.Writer, c.Request, name, time.Unix(meta.LastModified, 0), file)
+	http.ServeContent(c.Writer, c.Request, name, time.Unix(meta.LastModified, 0), section)
 }
 
 // HeadObject godoc
@@ -383,7 +386,7 @@ func HeadObject(c *gin.Context) {
 
 	// URL-decode key to handle percent-encoded names (e.g., spaces encoded as %20)
 	if decodedKey, err := url.PathUnescape(key); err == nil {
-		key = decodedKey
+		key = strings.TrimSpace(decodedKey)
 	} else {
 		e = fmt.Errorf("invalid object key encoding: %w", err)
 		span.SetStatus(codes.Error, e.Error())

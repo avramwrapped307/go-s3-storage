@@ -298,6 +298,24 @@ func DeleteObject(bucket, key string) error {
 		return err
 	}
 
+	// Cleanup any orphaned multipart uploads for this bucket/key
+	// When an object is deleted, any in-progress multipart uploads should also be aborted
+	orphanedUploads := metaStore.GetMultipartUploadsByKey(bucket, key)
+	for _, upload := range orphanedUploads {
+		log.Debugf("DeleteObject: Cleaning up orphaned multipart upload %s for %s/%s", upload.UploadID, bucket, key)
+
+		// Remove multipart directory
+		multipartDir := filepath.Join(storageDir, ".multipart", upload.UploadID)
+		if err := os.RemoveAll(multipartDir); err != nil {
+			log.Errorf("Failed to remove multipart directory %s: %v", multipartDir, err)
+		}
+
+		// Remove from metastore
+		if err := metaStore.RemoveMultipartUpload(upload.UploadID); err != nil {
+			log.Errorf("Failed to remove multipart upload %s from metastore: %v", upload.UploadID, err)
+		}
+	}
+
 	// Update bucket stats synchronously to ensure quota enforcement works correctly (decrement size and count)
 	if err := metaStore.UpdateBucketStats(bucket, -objectSize, -1); err != nil {
 		log.Errorf("Failed to update bucket stats for %s: %v", bucket, err)

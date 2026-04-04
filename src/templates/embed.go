@@ -21,13 +21,15 @@ type PageTemplates struct {
 // LoadTemplates parses all HTML templates and returns a template collection
 func LoadTemplates() (*PageTemplates, error) {
 	funcMap := template.FuncMap{
-		"formatBytes": FormatBytes,
-		"formatDate":  FormatDate,
-		"truncateHash": TruncateHash,
-		"add":         func(a, b int) int { return a + b },
-		"sub":         func(a, b int) int { return a - b },
-		"subtract":    func(a, b int) int { return a - b },
-		"mul":         func(a, b int) int { return a * b },
+		"formatBytes":   FormatBytes,
+		"formatDate":    FormatDate,
+		"truncateHash":  TruncateHash,
+		"urlEncode":     url.PathEscape,     // URL-encode paths for use in URLs (encodes # as %23, space as %20, etc.)
+		"queryEncode":   url.QueryEscape,    // URL-encode query parameters
+		"add":           func(a, b int) int { return a + b },
+		"sub":           func(a, b int) int { return a - b },
+		"subtract":      func(a, b int) int { return a - b },
+		"mul":           func(a, b int) int { return a * b },
 		"div": func(a, b int) int {
 			if b == 0 {
 				return 0

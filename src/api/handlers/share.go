@@ -191,7 +191,11 @@ func GetSharedObject(c *gin.Context) {
 	c.Header("ETag", "\""+meta.ETag+"\"")
 	c.Header("Content-Type", meta.ContentType)
 	c.Header("Last-Modified", time.Unix(meta.LastModified, 0).UTC().Format(http.TimeFormat))
+
+	// Extract filename from key and set Content-Disposition to preserve original filename
 	name := filepath.Base(key)
+	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", name))
+
 	http.ServeContent(c.Writer, c.Request, name, time.Unix(meta.LastModified, 0), file)
 }
 

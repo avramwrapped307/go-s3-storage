@@ -561,3 +561,22 @@ func (ms *MetaStore) GetExpiredUploads(ttlSeconds int64) []model.Multipart {
 
 	return expired
 }
+
+// GetMultipartUploadsByKey returns all multipart uploads for a specific bucket and key
+// Parameters:
+// - bucket: the bucket name
+// - key: the object key
+// Returns a slice of multipart uploads matching the bucket and key
+func (ms *MetaStore) GetMultipartUploadsByKey(bucket, key string) []model.Multipart {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	var uploads []model.Multipart
+	for _, upload := range ms.metadata.Multiparts {
+		if upload.Bucket == bucket && upload.Key == key {
+			uploads = append(uploads, upload)
+		}
+	}
+
+	return uploads
+}

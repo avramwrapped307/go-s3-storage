@@ -75,42 +75,24 @@ func InitiateMultipartUpload(ctx context.Context, bucket, key, contentType, owne
 // - key: the object key
 // - partNumber: the part number (1-10000)
 // - uploadID: the upload ID from InitiateMultipartUpload
-// - reader: the part data reader
-// - size: the size of the part in bytes
-// Returns the ETag (SHA256 hash) or an error
-func UploadPart(ctx context.Context, bucket, key string, partNumber int, uploadID string, reader vfs.MultipartFile, size int64) (string, error) {
+// - reader: the part data reader (HTTP body stream)
+// - expectedSize: expected size (from Content-Length header, or 0 for chunked encoding)
+// Returns the ETag (SHA256 hash), actual bytes written, or an error
+func UploadPart(ctx context.Context, bucket, key string, partNumber int, uploadID string, reader io.Reader, expectedSize int64) (string, int64, error) {
 	log := logger.SugaredLogger()
 	// Validate part number
 	if partNumber < 1 || partNumber > configuration.PartMaxCount {
-		return "", ErrInvalidPartNumber
-	}
-
-	// Validate part size (max 5GB)
-	if size > configuration.PartMaxSize {
-		return "", ErrEntityTooLarge
+		return "", 0, ErrInvalidPartNumber
 	}
 
 	// Get upload metadata to verify bucket/key match
 	upload, err := metaStore.GetMultipartUpload(uploadID)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
 	if upload.Bucket != bucket || upload.Key != key {
-		return "", ErrNoSuchUpload
-	}
-
-	// Check quota before uploading: calculate total size of existing parts + this part
-	// This prevents wasting resources uploading parts that will eventually fail quota check
-	var existingPartsSize int64
-	for _, part := range upload.Parts {
-		existingPartsSize += part.Size
-	}
-	totalSizeAfterUpload := existingPartsSize + size
-
-	// Check if this upload would exceed quota
-	if err := CheckStorageQuota(totalSizeAfterUpload); err != nil {
-		return "", err
+		return "", 0, ErrNoSuchUpload
 	}
 
 	// Build part path: <storage>/.multipart/<uploadID>/part.{partNumber}
@@ -121,44 +103,109 @@ func UploadPart(ctx context.Context, bucket, key string, partNumber int, uploadI
 	tmpPath := partPath + ".tmp"
 	tmpFile, err := os.Create(tmpPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to create temp part file: %w", err)
+		return "", 0, fmt.Errorf("failed to create temp part file: %w", err)
 	}
 
 	// Calculate SHA256 while writing (using MultiWriter)
 	hash := sha256.New()
 	multiWriter := io.MultiWriter(tmpFile, hash)
 
-	// Limit reader to exactly the specified size to prevent reading extra data
-	// This is critical: if the client sends more data than Content-Length indicates,
-	// we must not write it to the part file
-	var limitedReader io.Reader = reader
-	if size > 0 {
-		limitedReader = io.LimitReader(reader, size)
+	// Stream directly from HTTP body to part file
+	// For Content-Length mode: limit to expectedSize and validate
+	// For chunked encoding: read until EOF and validate afterwards
+	var written int64
+	if expectedSize > 0 {
+		// Content-Length present - validate and limit
+		if expectedSize > configuration.PartMaxSize {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", 0, ErrEntityTooLarge
+		}
+
+		// Limit reader to expected size
+		limitedReader := io.LimitReader(reader, expectedSize)
+		written, err = vfs.CopyWithContext(ctx, multiWriter, limitedReader)
+		if err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", 0, fmt.Errorf("failed to write part data: %w", err)
+		}
+
+		// Verify we received exactly the expected amount
+		if written != expectedSize {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", 0, fmt.Errorf("size mismatch: expected %d bytes, got %d bytes", expectedSize, written)
+		}
+	} else {
+		// Chunked encoding: read until EOF
+		written, err = vfs.CopyWithContext(ctx, multiWriter, reader)
+		if err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", 0, fmt.Errorf("failed to write part data: %w", err)
+		}
+
+		// Validate size constraints after reading
+		if written <= 0 {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", 0, fmt.Errorf("no data received")
+		}
+
+		if written > configuration.PartMaxSize {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", 0, ErrEntityTooLarge
+		}
+
+		// Diagnostic: check if there's extra data beyond a clean 64MB boundary
+		// AWS CLI typically uses 64MB (67108864 bytes) chunks
+		cleanChunkSize := int64(64 * 1024 * 1024) // 67108864
+		if written > cleanChunkSize {
+			extraBytes := written - cleanChunkSize
+			log.Debugf("UploadPart: Part %d has %d extra bytes beyond 64MB boundary (total: %d, clean: %d)",
+				partNumber, extraBytes, written, cleanChunkSize)
+		}
 	}
 
-	// Use context-aware copy
-	written, err := vfs.CopyWithContext(ctx, multiWriter, limitedReader)
-	if err != nil {
+	log.Debugf("UploadPart: Received %d bytes for part %d (expected: %d)", written, partNumber, expectedSize)
+
+	// Check quota AFTER we know the actual size
+	var existingPartsSize int64
+	for _, part := range upload.Parts {
+		existingPartsSize += part.Size
+	}
+	totalSizeAfterUpload := existingPartsSize + written
+	if err := CheckStorageQuota(totalSizeAfterUpload); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("failed to write part data: %w", err)
+		return "", 0, err
+	}
+
+	// Truncate file to exact size to remove any potential extra bytes
+	// This ensures the part file on disk is exactly the size we expect
+	if err = tmpFile.Truncate(written); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", 0, fmt.Errorf("failed to truncate part file: %w", err)
 	}
 
 	if err = tmpFile.Sync(); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("failed to sync part file: %w", err)
+		return "", 0, fmt.Errorf("failed to sync part file: %w", err)
 	}
 
 	if err = tmpFile.Close(); err != nil {
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("failed to close part file: %w", err)
+		return "", 0, fmt.Errorf("failed to close part file: %w", err)
 	}
 
 	// Atomic rename
 	if err = os.Rename(tmpPath, partPath); err != nil {
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("failed to rename part file: %w", err)
+		return "", 0, fmt.Errorf("failed to rename part file: %w", err)
 	}
 
 	// Calculate ETag (SHA256 hex)
@@ -173,13 +220,13 @@ func UploadPart(ctx context.Context, bucket, key string, partNumber int, uploadI
 	}
 
 	if err = metaStore.UpdateMultipartPart(uploadID, partNumber, partUpload); err != nil {
-		return "", fmt.Errorf("failed to update part metadata: %w", err)
+		return "", 0, fmt.Errorf("failed to update part metadata: %w", err)
 	}
 
 	// Debug: log stored part metadata
 	log.Debugf("UploadPart: uploadID=%s part=%d storedETag=%s size=%d", uploadID, partNumber, etag, written)
 
-	return etag, nil
+	return etag, written, nil
 }
 
 // CompleteMultipartUpload assembles parts into final object
@@ -279,13 +326,10 @@ func CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, 
 	finalPartPath := filepath.Join(diskPath, "part.1")
 	xlMetaPath := filepath.Join(objectPath, "xl.meta")
 
-	// Clean up any existing object at this key to prevent conflicts
-	// This handles cases where the same key is uploaded multiple times
-	if _, err = os.Stat(objectPath); err == nil {
-		log.Debugf("DEBUG CompleteMultipart: Removing existing object at %s", objectPath)
-		if err = os.RemoveAll(objectPath); err != nil {
-			return nil, fmt.Errorf("failed to remove existing object: %w", err)
-		}
+	// Check if object already exists - should not happen since handler checks this
+	// but defensive check here to prevent data loss
+	if _, err = os.Stat(xlMetaPath); err == nil {
+		return nil, fmt.Errorf("object already exists at key %s", key)
 	}
 
 	// Create directory structure
@@ -301,7 +345,7 @@ func CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, 
 	}
 
 	multipartDir := filepath.Join(storageDir, ".multipart", uploadID)
-	for _, part := range sortedParts {
+	for i, part := range sortedParts {
 		// Check context cancellation between parts
 		select {
 		case <-ctx.Done():
@@ -320,23 +364,38 @@ func CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, 
 			return nil, fmt.Errorf("failed to open part file: %w", err)
 		}
 
-		// Get part file size for logging
+		// Get part file size for logging and validation
 		partInfo, _ := partFile.Stat()
 		partFileSize := int64(0)
 		if partInfo != nil {
 			partFileSize = partInfo.Size()
 		}
-		log.Debugf("Assembling part %d from %s (size: %d bytes)", part.PartNumber, partPath, partFileSize)
 
-		// Copy part to final file
-		copied, err := vfs.CopyWithContext(ctx, finalFile, partFile)
+		// Get expected size from partMetadata (which has the Size field)
+		expectedSize := partMetadata[i].Size
+		log.Debugf("Assembling part %d from %s (file size: %d bytes, metadata size: %d bytes)",
+			part.PartNumber, partPath, partFileSize, expectedSize)
+
+		// Copy ONLY the expected number of bytes from part file to prevent extra data
+		// Use LimitReader to ensure we don't copy more than what was originally uploaded
+		limitedReader := io.LimitReader(partFile, expectedSize)
+		copied, err := vfs.CopyWithContext(ctx, finalFile, limitedReader)
 		partFile.Close()
 		if err != nil {
 			finalFile.Close()
 			os.RemoveAll(objectPath)
 			return nil, fmt.Errorf("failed to copy part data: %w", err)
 		}
-		log.Debugf("Copied %d bytes for part %d", copied, part.PartNumber)
+
+		// Validate we copied exactly the expected amount
+		if copied != expectedSize {
+			log.Errorf("Part %d: copied %d bytes but expected %d bytes", part.PartNumber, copied, expectedSize)
+			finalFile.Close()
+			os.RemoveAll(objectPath)
+			return nil, fmt.Errorf("part %d size mismatch: copied %d bytes, expected %d bytes",
+				part.PartNumber, copied, expectedSize)
+		}
+		log.Debugf("Successfully copied %d bytes for part %d", copied, part.PartNumber)
 	}
 
 	if err = finalFile.Sync(); err != nil {
@@ -379,23 +438,47 @@ func CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, 
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	log.Debugf("CompleteMultipart: Initial contentType from upload metadata: %s", contentType)
+
 	if MagikaScanner != nil {
 		// Open final file for scanning
 		scanFile, err := os.Open(finalPartPath)
 		if err == nil {
+			// Ensure file pointer is at the beginning
+			scanFile.Seek(0, io.SeekStart)
+
 			select {
 			case ScanSem <- struct{}{}:
 				result, scanErr := MagikaScanner.Scan(scanFile, int(totalSize))
 				<-ScanSem
 				if scanErr == nil && result.MimeType != "" {
-					contentType = result.MimeType
+					log.Debugf("CompleteMultipart: Magika detected type: %s (label: %s)",
+						result.MimeType, result.Label)
+
+					// Only override if content type was not provided or was generic
+					if upload.ContentType == "" || upload.ContentType == "application/octet-stream" {
+						contentType = result.MimeType
+						log.Debugf("CompleteMultipart: Using Magika detected type: %s", contentType)
+					} else {
+						log.Debugf("CompleteMultipart: Keeping original content type %s, Magika suggested %s",
+							contentType, result.MimeType)
+					}
+				} else if scanErr != nil {
+					log.Debugf("CompleteMultipart: Magika scan error: %v", scanErr)
 				}
 			case <-ctx.Done():
 				// Context canceled, use default content type
+				log.Debugf("CompleteMultipart: Context canceled during Magika scan")
 			}
 			scanFile.Close()
+		} else {
+			log.Debugf("CompleteMultipart: Failed to open file for Magika scan: %v", err)
 		}
+	} else {
+		log.Debugf("CompleteMultipart: Magika scanner not available")
 	}
+
+	log.Debugf("CompleteMultipart: Final contentType: %s", contentType)
 
 	// Build object metadata with full Parts array
 	now := time.Now().Unix()

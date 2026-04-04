@@ -1,14 +1,11 @@
 package handlers
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"bufio"
 	"encoding/xml"
 	"fmt"
-	"hash"
 	"io"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 
@@ -25,6 +22,98 @@ import (
 	"s3-storage/model"
 	"s3-storage/services"
 )
+
+// awsChunkReader decodes AWS Signature V4 chunked encoding format:
+// <hex-byte-count>;chunk-signature=<signature>\r\n
+// <data-bytes>\r\n
+// ... repeats ...
+// 0;chunk-signature=<signature>\r\n
+// <optional-trailers>\r\n
+type awsChunkReader struct {
+	reader    *bufio.Reader
+	buffer    []byte
+	bufferPos int
+	totalRead int64
+	finished  bool
+}
+
+func newAWSChunkReader(r io.Reader) *awsChunkReader {
+	return &awsChunkReader{
+		reader: bufio.NewReader(r),
+	}
+}
+
+func (r *awsChunkReader) Read(p []byte) (n int, err error) {
+	if r.finished {
+		return 0, io.EOF
+	}
+
+	// If we have buffered data, return it first
+	if r.bufferPos < len(r.buffer) {
+		n = copy(p, r.buffer[r.bufferPos:])
+		r.bufferPos += n
+		r.totalRead += int64(n)
+		return n, nil
+	}
+
+	// Read next chunk
+	// Format: <hex-size>;chunk-signature=<sig>\r\n
+	chunkHeader, err := r.reader.ReadString('\n')
+	if err != nil {
+		return 0, fmt.Errorf("failed to read chunk header: %w", err)
+	}
+
+	// Parse chunk size (everything before semicolon or \r\n)
+	chunkHeader = strings.TrimSpace(chunkHeader)
+	sizeStr := chunkHeader
+	if idx := strings.Index(chunkHeader, ";"); idx != -1 {
+		sizeStr = chunkHeader[:idx]
+	}
+
+	chunkSize, err := strconv.ParseInt(sizeStr, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse chunk size '%s': %w", sizeStr, err)
+	}
+
+	// If chunk size is 0, we're done (read trailers and finish)
+	if chunkSize == 0 {
+		r.finished = true
+		// Read and discard trailers until empty line
+		for {
+			line, err := r.reader.ReadString('\n')
+			if err != nil && err != io.EOF {
+				return 0, err
+			}
+			if strings.TrimSpace(line) == "" || err == io.EOF {
+				break
+			}
+		}
+		return 0, io.EOF
+	}
+
+	// Read chunk data
+	r.buffer = make([]byte, chunkSize)
+	_, err = io.ReadFull(r.reader, r.buffer)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read chunk data: %w", err)
+	}
+
+	// Read and discard trailing \r\n
+	trailer := make([]byte, 2)
+	_, err = io.ReadFull(r.reader, trailer)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read chunk trailer: %w", err)
+	}
+	// Note: We expect \r\n but don't strictly validate it to be lenient
+
+	// Copy from buffer to output
+	r.bufferPos = 0
+	n = copy(p, r.buffer)
+	r.bufferPos = n
+	r.totalRead += int64(n)
+
+	return n, nil
+}
 
 // InitiateMultipartUploadHandler handles POST /:bucket/*key?uploads
 // It initiates a new multipart upload and returns the upload ID
@@ -87,6 +176,7 @@ func InitiateMultipartUploadHandler(c *gin.Context) {
 
 	// Get content type from headers
 	contentType := c.GetHeader("Content-Type")
+	log.Debugf("InitiateMultipartUpload: Content-Type header: %q", contentType)
 
 	// Get owner ID (use user ID or default)
 	ownerID := configuration.OwnerId
@@ -170,6 +260,31 @@ func UploadPartHandler(c *gin.Context) {
 	// Note: This will be -1 if using chunked transfer encoding (common with Cloudflare)
 	declaredSize := c.Request.ContentLength
 
+	// Check for AWS-specific headers that might contain the true content length
+	// x-amz-decoded-content-length: actual content size before chunked encoding
+	// If present and valid, use it instead of Content-Length (which may be -1 in chunked mode)
+	decodedContentLength := c.GetHeader("x-amz-decoded-content-length")
+	if decodedContentLength != "" {
+		log.Debugf("UploadPart: Found x-amz-decoded-content-length header: %s", decodedContentLength)
+		// Try to parse and use it
+		if parsedSize, err := strconv.ParseInt(decodedContentLength, 10, 64); err == nil && parsedSize > 0 {
+			log.Debugf("UploadPart: Using decoded content length %d instead of Content-Length %d", parsedSize, declaredSize)
+			declaredSize = parsedSize
+		}
+	}
+
+	// Log other AWS headers for diagnosis
+	contentSHA256 := c.GetHeader("x-amz-content-sha256")
+	if contentSHA256 != "" {
+		log.Debugf("UploadPart: Found x-amz-content-sha256: %s", contentSHA256)
+	}
+
+	// Log Transfer-Encoding header
+	transferEncoding := c.Request.Header.Get("Transfer-Encoding")
+	if transferEncoding != "" {
+		log.Debugf("UploadPart: Transfer-Encoding: %s", transferEncoding)
+	}
+
 	// If we have a declared size, validate it doesn't exceed max
 	if declaredSize > 0 && declaredSize > configuration.PartMaxSize {
 		e = fmt.Errorf("part too large: size %d exceeds max limit", declaredSize)
@@ -209,117 +324,37 @@ func UploadPartHandler(c *gin.Context) {
 			attribute.Int("PartNumber", partNumber),
 			attribute.String("CorrelationId", correlationId)))
 
-	// Get request body
+	// Get request body - stream directly to service (no temp file in handler)
 	body := c.Request.Body
 	defer body.Close()
 
-	// Get X-Amz-Content-SHA256 header for ETag, or calculate it server-side
-	contentSHA256 := c.GetHeader("X-Amz-Content-SHA256")
+	// Prepare reader based on Content-Length presence and AWS chunk encoding
+	var partReader io.Reader
+	var expectedSize int64 = declaredSize
 
-	// Stream to temporary file
-	tempFile, err := os.CreateTemp(configuration.AppConfig().StorageDirectory, "s3-part-upload-*")
-	if err != nil {
-		e = fmt.Errorf("error creating temporary file: %s", err)
-		span.SetStatus(codes.Error, e.Error())
-		span.RecordError(err)
-		log.Errorf("%s", e)
-		response.FailureXmlResponse(c, err, key)
-		return
-	}
-	tempFileName := tempFile.Name()
-	defer os.Remove(tempFileName)
-
-	// Prepare destination writer (with or without hashing)
-	var destination io.Writer = tempFile
-	var hasher hash.Hash
-
-	if contentSHA256 == "" || contentSHA256 == "UNSIGNED-PAYLOAD" {
-		// Calculate SHA256 while streaming to temp file
-		hasher = sha256.New()
-		destination = io.MultiWriter(tempFile, hasher)
-	}
-
-	// Stream request body to temp file
-	// Handle both cases: Content-Length present or chunked encoding
-	var bytesWritten int64
-	if declaredSize > 0 {
-		// Content-Length is present - limit reader to prevent reading extra data
-		bytesWritten, err = io.Copy(destination, io.LimitReader(body, declaredSize))
+	// Check if AWS is using chunk-signature encoding
+	if contentSHA256 == "STREAMING-UNSIGNED-PAYLOAD-TRAILER" || contentSHA256 == "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER" {
+		// AWS Signature V4 chunked encoding - decode it
+		log.Debugf("UploadPart: Detected AWS chunk-signature encoding, using chunk decoder")
+		partReader = newAWSChunkReader(body)
+		// Use decoded content length as expected size
+		expectedSize = declaredSize
+	} else if declaredSize > 0 {
+		// Content-Length present - limit reader to prevent reading extra data
+		partReader = io.LimitReader(body, declaredSize)
+		expectedSize = declaredSize
+		log.Debugf("UploadPart: Content-Length mode, limiting to %d bytes", declaredSize)
 	} else {
-		// Chunked encoding (no Content-Length) - read entire body until EOF
-		// Trust that Cloudflare/proxy will close the stream after the chunk
-		// We'll validate size afterwards
-		bytesWritten, err = io.Copy(destination, body)
+		// Chunked encoding (no Content-Length) - pass body directly
+		// Service will read until EOF and validate size
+		partReader = body
+		expectedSize = 0
+		log.Debugf("UploadPart: Chunked encoding mode, reading until EOF")
 	}
 
-	if err != nil {
-		tempFile.Close()
-		e = fmt.Errorf("error streaming request body: %s", err)
-		span.SetStatus(codes.Error, e.Error())
-		span.RecordError(err)
-		log.Errorf("%s", e)
-		response.FailureXmlResponse(c, err, key)
-		return
-	}
-
-	// Validate actual size received
-	if bytesWritten <= 0 {
-		tempFile.Close()
-		e = fmt.Errorf("no data received: bytesWritten=%d", bytesWritten)
-		span.SetStatus(codes.Error, e.Error())
-		span.RecordError(e)
-		log.Errorf("%s", e)
-		response.FailureXmlResponse(c, services.ErrInvalidPart, key)
-		return
-	}
-
-	// Check if actual size exceeds maximum
-	if bytesWritten > configuration.PartMaxSize {
-		tempFile.Close()
-		e = fmt.Errorf("part too large: received %d bytes, exceeds max limit of %d", bytesWritten, configuration.PartMaxSize)
-		span.SetStatus(codes.Error, e.Error())
-		span.RecordError(e)
-		log.Errorf("%s", e)
-		response.FailureXmlResponse(c, services.ErrEntityTooLarge, key)
-		return
-	}
-
-	// If Content-Length was declared, verify it matches actual bytes
-	if declaredSize > 0 && bytesWritten != declaredSize {
-		tempFile.Close()
-		e = fmt.Errorf("size mismatch: Content-Length=%d but received %d bytes (possible truncation)", declaredSize, bytesWritten)
-		span.SetStatus(codes.Error, e.Error())
-		span.RecordError(e)
-		log.Errorf("%s", e)
-		response.FailureXmlResponse(c, services.ErrInvalidPart, key)
-		return
-	}
-
-	log.Debugf("UploadPart: Successfully received part data - declared_size=%d, actual_size=%d", declaredSize, bytesWritten)
-
-	// Get calculated SHA256 if we computed it
-	if hasher != nil {
-		contentSHA256 = hex.EncodeToString(hasher.Sum(nil))
-	}
-
-	// Close and reopen temp file for reading
-	tempFile.Close()
-	tempFile, err = os.Open(tempFileName)
-	if err != nil {
-		e = fmt.Errorf("error reopening temporary file: %s", err)
-		span.SetStatus(codes.Error, e.Error())
-		span.RecordError(err)
-		log.Errorf("%s", e)
-		response.FailureXmlResponse(c, err, key)
-		return
-	}
-	defer tempFile.Close()
-
-	// Use the actual bytes written, not Content-Length (in case of discrepancy)
-	actualSize := bytesWritten
-
-	// Call service to upload part
-	etag, err := services.UploadPart(ctx, bucket, key, partNumber, uploadID, tempFile, actualSize)
+	// Call service to upload part directly from HTTP body
+	// Service handles all validation, I/O, hashing, quota checks, and storage
+	etag, actualSize, err := services.UploadPart(ctx, bucket, key, partNumber, uploadID, partReader, expectedSize)
 	if err != nil {
 		e = fmt.Errorf("error uploading part: %s", err)
 		span.SetStatus(codes.Error, e.Error())
@@ -328,6 +363,9 @@ func UploadPartHandler(c *gin.Context) {
 		response.FailureXmlResponse(c, err, key)
 		return
 	}
+
+	log.Debugf("UploadPart: Successfully uploaded part %d - etag=%s, size=%d bytes",
+		partNumber, etag, actualSize)
 
 	// Return success with ETag header
 	c.Header("ETag", fmt.Sprintf("\"%s\"", etag))

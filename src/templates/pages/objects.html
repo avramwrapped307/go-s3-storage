@@ -258,7 +258,7 @@
                     </td>
                     <td class="px-6 py-4 border-b border-gray-100">
                         <div class="flex items-center gap-2">
-                            <a href="/{{$.Bucket}}/{{.Key}}" target="_blank"
+                            <a href="/{{$.Bucket}}/{{urlEncode .Key}}" target="_blank"
                                 class="text-primary hover:text-primary-dark text-sm">Download</a>
                             {{if $.CanWrite}}
                             <span class="text-gray-300">|</span>

@@ -175,7 +175,7 @@ func TestCompleteMultipartUploadHandler(t *testing.T) {
 	var completedParts []model.CompletedPartRequest
 	for _, part := range parts {
 		reader := bytes.NewReader(part.data)
-		etag, err := services.UploadPart(ctx, bucket, key, part.partNumber, uploadID, &mockReaderCloser{reader}, int64(len(part.data)))
+		etag, _, err := services.UploadPart(ctx, bucket, key, part.partNumber, uploadID, reader, int64(len(part.data)))
 		assert.NoError(t, err)
 
 		completedParts = append(completedParts, model.CompletedPartRequest{
@@ -231,7 +231,7 @@ func TestCompleteMultipartUploadHandlerInvalidParts(t *testing.T) {
 
 	// Upload one valid part
 	partData := bytes.Repeat([]byte("Part 1 "), 1024*1024)
-	etag, _ := services.UploadPart(ctx, bucket, key, 1, uploadID, &mockReaderCloser{bytes.NewReader(partData)}, int64(len(partData)))
+	etag, _, _ := services.UploadPart(ctx, bucket, key, 1, uploadID, bytes.NewReader(partData), int64(len(partData)))
 
 	// Test with wrong ETag
 	reqBody := model.CompleteMultipartUploadRequest{
@@ -293,7 +293,7 @@ func TestAbortMultipartUploadHandler(t *testing.T) {
 
 	// Upload one part
 	partData := bytes.Repeat([]byte("test"), 1024*1024)
-	_, _ = services.UploadPart(ctx, bucket, key, 1, uploadID, &mockReaderCloser{bytes.NewReader(partData)}, int64(len(partData)))
+	_, _, _ = services.UploadPart(ctx, bucket, key, 1, uploadID, bytes.NewReader(partData), int64(len(partData)))
 
 	// Test abort multipart upload
 	req := httptest.NewRequest(
@@ -333,7 +333,7 @@ func TestListPartsHandler(t *testing.T) {
 	// Upload 3 parts
 	for i := 1; i <= 3; i++ {
 		partData := []byte(fmt.Sprintf("Part %d data", i))
-		_, _ = services.UploadPart(ctx, bucket, key, i, uploadID, &mockReaderCloser{bytes.NewReader(partData)}, int64(len(partData)))
+		_, _, _ = services.UploadPart(ctx, bucket, key, i, uploadID, bytes.NewReader(partData), int64(len(partData)))
 	}
 
 	// Test list parts
@@ -384,7 +384,7 @@ func TestListPartsHandlerPagination(t *testing.T) {
 	// Upload 5 parts
 	for i := 1; i <= 5; i++ {
 		partData := []byte(fmt.Sprintf("Part %d data", i))
-		_, _ = services.UploadPart(ctx, bucket, key, i, uploadID, &mockReaderCloser{bytes.NewReader(partData)}, int64(len(partData)))
+		_, _, _ = services.UploadPart(ctx, bucket, key, i, uploadID, bytes.NewReader(partData), int64(len(partData)))
 	}
 
 	// Test with max-parts=2
@@ -536,13 +536,4 @@ func TestMultipartUploadEndToEnd(t *testing.T) {
 
 	// Verify object exists
 	assert.True(t, services.ObjectExists(bucket, key))
-}
-
-// mockReaderCloser wraps io.Reader to implement io.ReadSeekCloser
-type mockReaderCloser struct {
-	*bytes.Reader
-}
-
-func (m *mockReaderCloser) Close() error {
-	return nil
 }

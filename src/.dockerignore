@@ -1,0 +1,7 @@
+/data
+s3-storage.nomad
+.git
+*.md
+.cache
+.claude
+.deps

@@ -17,19 +17,7 @@ import (
 )
 
 // mockMultipartFile implements vfs.MultipartFile for testing
-type mockMultipartFile struct {
-	*bytes.Reader
-}
-
-func (m *mockMultipartFile) Close() error {
-	return nil
-}
-
-func newMockMultipartFile(data []byte) *mockMultipartFile {
-	return &mockMultipartFile{
-		Reader: bytes.NewReader(data),
-	}
-}
+// Removed mockMultipartFile - using bytes.NewReader directly
 
 func TestInitiateMultipartUpload(t *testing.T) {
 	// Setup test environment
@@ -107,9 +95,9 @@ func TestUploadPart(t *testing.T) {
 	partNumber := 1
 	partData := []byte("This is test data for part 1")
 	partSize := int64(len(partData))
-	reader := newMockMultipartFile(partData)
+	reader := bytes.NewReader(partData)
 
-	etag, err := UploadPart(ctx, bucket, key, partNumber, uploadID, reader, partSize)
+	etag, _, err := UploadPart(ctx, bucket, key, partNumber, uploadID, reader, partSize)
 	if err != nil {
 		t.Fatalf("UploadPart failed: %v", err)
 	}
@@ -175,9 +163,9 @@ func TestUploadPartInvalidPartNumber(t *testing.T) {
 	for _, partNumber := range testCases {
 		t.Run(fmt.Sprintf("PartNumber=%d", partNumber), func(t *testing.T) {
 			partData := []byte("test data")
-			reader := newMockMultipartFile(partData)
+			reader := bytes.NewReader(partData)
 
-			_, err := UploadPart(ctx, bucket, key, partNumber, uploadID, reader, int64(len(partData)))
+			_, _, err := UploadPart(ctx, bucket, key, partNumber, uploadID, reader, int64(len(partData)))
 			if err != ErrInvalidPartNumber {
 				t.Errorf("Expected ErrInvalidPartNumber, got %v", err)
 			}
@@ -208,8 +196,8 @@ func TestCompleteMultipartUpload(t *testing.T) {
 	var completedParts []model.CompletedPartRequest
 	for i, data := range partsData {
 		partNumber := i + 1
-		reader := newMockMultipartFile(data)
-		etag, err := UploadPart(ctx, bucket, key, partNumber, uploadID, reader, int64(len(data)))
+		reader := bytes.NewReader(data)
+		etag, _, err := UploadPart(ctx, bucket, key, partNumber, uploadID, reader, int64(len(data)))
 		if err != nil {
 			t.Fatalf("Failed to upload part %d: %v", partNumber, err)
 		}
@@ -302,8 +290,8 @@ func TestCompleteMultipartUploadInvalidParts(t *testing.T) {
 	part1Data := bytes.Repeat([]byte("Part 1 "), 1024*1024) // ~7MB
 	part2Data := bytes.Repeat([]byte("Part 2 "), 1024*1024) // ~7MB
 
-	etag1, _ := UploadPart(ctx, bucket, key, 1, uploadID, newMockMultipartFile(part1Data), int64(len(part1Data)))
-	etag2, _ := UploadPart(ctx, bucket, key, 2, uploadID, newMockMultipartFile(part2Data), int64(len(part2Data)))
+	etag1, _, _ := UploadPart(ctx, bucket, key, 1, uploadID, bytes.NewReader(part1Data), int64(len(part1Data)))
+	etag2, _, _ := UploadPart(ctx, bucket, key, 2, uploadID, bytes.NewReader(part2Data), int64(len(part2Data)))
 
 	// Test: Missing part
 	t.Run("MissingPart", func(t *testing.T) {
@@ -356,8 +344,8 @@ func TestCompleteMultipartUploadTooSmallParts(t *testing.T) {
 	part1Data := []byte("Too small") // < 5MB
 	part2Data := []byte("Last part can be any size")
 
-	etag1, _ := UploadPart(ctx, bucket, key, 1, uploadID, newMockMultipartFile(part1Data), int64(len(part1Data)))
-	etag2, _ := UploadPart(ctx, bucket, key, 2, uploadID, newMockMultipartFile(part2Data), int64(len(part2Data)))
+	etag1, _, _ := UploadPart(ctx, bucket, key, 1, uploadID, bytes.NewReader(part1Data), int64(len(part1Data)))
+	etag2, _, _ := UploadPart(ctx, bucket, key, 2, uploadID, bytes.NewReader(part2Data), int64(len(part2Data)))
 
 	completedParts := []model.CompletedPartRequest{
 		{PartNumber: 1, ETag: etag1},
@@ -385,7 +373,7 @@ func TestAbortMultipartUpload(t *testing.T) {
 
 	// Upload one part
 	partData := bytes.Repeat([]byte("test"), 1024*1024) // ~4MB
-	_, err := UploadPart(ctx, bucket, key, 1, uploadID, newMockMultipartFile(partData), int64(len(partData)))
+	_, _, err := UploadPart(ctx, bucket, key, 1, uploadID, bytes.NewReader(partData), int64(len(partData)))
 	if err != nil {
 		t.Fatalf("Failed to upload part: %v", err)
 	}
@@ -424,7 +412,7 @@ func TestListParts(t *testing.T) {
 	// Upload 5 parts
 	for i := 1; i <= 5; i++ {
 		partData := []byte(fmt.Sprintf("Part %d data", i))
-		_, err := UploadPart(ctx, bucket, key, i, uploadID, newMockMultipartFile(partData), int64(len(partData)))
+		_, _, err := UploadPart(ctx, bucket, key, i, uploadID, bytes.NewReader(partData), int64(len(partData)))
 		if err != nil {
 			t.Fatalf("Failed to upload part %d: %v", i, err)
 		}
@@ -565,14 +553,14 @@ func TestUploadPartOverwrite(t *testing.T) {
 
 	// Upload part 1 first time
 	firstData := []byte("First upload")
-	firstETag, err := UploadPart(ctx, bucket, key, partNumber, uploadID, newMockMultipartFile(firstData), int64(len(firstData)))
+	firstETag, _, err := UploadPart(ctx, bucket, key, partNumber, uploadID, bytes.NewReader(firstData), int64(len(firstData)))
 	if err != nil {
 		t.Fatalf("First UploadPart failed: %v", err)
 	}
 
 	// Upload part 1 second time (should overwrite)
 	secondData := []byte("Second upload - overwrites first")
-	secondETag, err := UploadPart(ctx, bucket, key, partNumber, uploadID, newMockMultipartFile(secondData), int64(len(secondData)))
+	secondETag, _, err := UploadPart(ctx, bucket, key, partNumber, uploadID, bytes.NewReader(secondData), int64(len(secondData)))
 	if err != nil {
 		t.Fatalf("Second UploadPart failed: %v", err)
 	}
@@ -619,8 +607,8 @@ func TestCompleteMultipartUploadContextCancellation(t *testing.T) {
 	part1Data := bytes.Repeat([]byte("Part 1 "), 1024*1024) // ~7MB
 	part2Data := bytes.Repeat([]byte("Part 2 "), 1024*1024) // ~7MB
 
-	etag1, _ := UploadPart(ctx, bucket, key, 1, uploadID, newMockMultipartFile(part1Data), int64(len(part1Data)))
-	etag2, _ := UploadPart(ctx, bucket, key, 2, uploadID, newMockMultipartFile(part2Data), int64(len(part2Data)))
+	etag1, _, _ := UploadPart(ctx, bucket, key, 1, uploadID, bytes.NewReader(part1Data), int64(len(part1Data)))
+	etag2, _, _ := UploadPart(ctx, bucket, key, 2, uploadID, bytes.NewReader(part2Data), int64(len(part2Data)))
 
 	completedParts := []model.CompletedPartRequest{
 		{PartNumber: 1, ETag: etag1},
